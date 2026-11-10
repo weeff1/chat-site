@@ -142,6 +142,13 @@
     background: #ff7a00; color: #fff; font-size: 10px; padding: 1px 6px;
     border-radius: 4px; line-height: 1.5;
   }
+  .vbadge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; margin-left: 4px; vertical-align: -2px;
+    background: #1a73e8; color: #fff; border-radius: 50%;
+    font-size: 10px; font-weight: 700; line-height: 1;
+  }
+  .vbadge.big { width: auto; height: auto; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
   .meta { font-size: 11px; color: #a8abb2; margin-bottom: 3px; }
   .bubble {
     background: #fff; padding: 9px 12px; border-radius: 12px;
@@ -406,6 +413,14 @@
     var g = findGroup(gid);
     return g ? g.o : '';
   }
+  function isVerified(acc) {
+    var u = (db.users || []).filter(function (x) { return x.a === acc; })[0];
+    return !!(u && u.v);
+  }
+  function vTag(acc) {
+    return isVerified(acc) ? '<span class="vbadge" title="认证账号">✓</span>' : '';
+  }
+
   function isGroupOwner(gid) {
     var g = findGroup(gid);
     return !!g && (g.o === me || isOwner(me));
@@ -647,7 +662,7 @@
       html +=
         '<div class="conv" data-conv="u:' + esc(f) + '">' +
           avaHTML(f) +
-          '<div class="info"><div class="nm">' + esc(f) + '</div>' +
+          '<div class="info"><div class="nm">' + esc(f) + vTag(f) + '</div>' +
           '<div class="sb">' + (l ? esc((l.a === me ? '我：' : '') + String(l.x || '').slice(0, 18)) : '还没有聊过') + '</div></div>' +
         '</div>';
     });
@@ -791,8 +806,7 @@
       if (isGroup(conv)) badge = (m.a === groupOwnerOf(convGid(conv)));
       else badge = isOwner(m.a);
       if (badge) html += '<div class="badge-line ' + (mine ? 'me' : 'other') + '"><span class="owner-badge">群主</span></div>';
-      if (conv !== 'public') html += '<div class="meta">' + esc(m.a) +
-        (isGroup(conv) && m.a === groupOwnerOf(convGid(conv)) ? '' : '') + '</div>';
+      if (conv !== 'public') html += '<div class="meta">' + esc(m.a) + vTag(m.a) + '</div>';
       html += '<div class="bubble">' + bubbleHTML(m) + '</div>' +
         '<div class="meta">' + fmtTime(m.t) + '</div>' +
         '</div></div>';
