@@ -164,6 +164,20 @@
     background: none; border: none; padding: 0; font-family: inherit; text-align: left;
   }
   .msg.me .file-btn { color: #fff; }
+  .msg-img { max-width: 190px; max-height: 240px; display: block; border-radius: 8px;
+             cursor: zoom-in; min-height: 56px; background: rgba(0,0,0,.05); object-fit: cover; }
+  .msg-vid { width: 190px; height: 110px; border-radius: 8px; background: #22252b; color: #fff;
+             display: flex; flex-direction: column; align-items: center; justify-content: center;
+             gap: 6px; cursor: pointer; font-size: 12px; overflow: hidden; padding: 0 8px;
+             text-align: center; }
+  .msg-vid .vplay { font-size: 22px; line-height: 1; }
+  .msg-vid.playing { width: auto; height: auto; background: transparent; padding: 0; }
+  .video-el { max-width: 210px; max-height: 260px; border-radius: 8px; display: block; }
+  .media-miss { font-size: 12px; color: #a8abb2; }
+  .img-mask { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 9999;
+              display: flex; align-items: center; justify-content: center; padding: 14px; }
+  .img-mask img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+  .img-mask .tip { position: absolute; bottom: 24px; color: rgba(255,255,255,.6); font-size: 12px; }
   .revoked { font-size: 12px; color: #a8abb2; font-style: italic; }
   #bar {
     flex: none; display: flex; align-items: flex-end; gap: 8px;
@@ -398,6 +412,7 @@
     var attempt = 0;
     function once() {
       attempt++;
+      _dropFids = [];
       return ghGet(DB_PATH, '').then(function (r) {
         if (r.missing) throw new Error('数据库文件不存在');
         var cur = normalize(JSON.parse(r.text));
@@ -408,6 +423,7 @@
             db = cur;
             dbEtag = '';
             dbSha = '';
+            flushDeletedFiles();
             return true;
           }
           if (attempt < 3) return sleep(300).then(once);
@@ -517,11 +533,39 @@
     db.msgs.forEach(function (x) { if (x.i > m) m = x.i; });
     return m + 1;
   }
+  /* 过期或被清掉的文件消息，记下它的文件编号，稍后把仓库里的实体也删掉 */
+  var _dropFids = [];
   function cleanMsgs(list) {
     var cut = Date.now() - KEEP_DAYS * 864e5;
     var out = list.filter(function (m) { return (m.t || 0) > cut; });
     if (out.length > KEEP_MSGS) out = out.slice(out.length - KEEP_MSGS);
+    var kept = {};
+    out.forEach(function (m) { kept[m.i] = 1; });
+    list.forEach(function (m) {
+      if (m.ty === 'f' && m.fid && !kept[m.i] && _dropFids.indexOf(m.fid) < 0) _dropFids.push(m.fid);
+    });
     return out;
+  }
+
+  /* 真正删掉仓库里的文件本体 */
+  function flushDeletedFiles() {
+    if (!_dropFids.length) return;
+    var todo = _dropFids.slice();
+    _dropFids = [];
+    todo.forEach(function (fid) {
+      var url = API + 'files/' + encodeURIComponent(fid);
+      fetch(url, { headers: { Authorization: 'token ' + TOKEN } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || !j.sha) return;
+          return fetch(url, {
+            method: 'DELETE',
+            headers: { Authorization: 'token ' + TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: 'auto clean ' + fid, sha: j.sha })
+          });
+        })
+        .catch(function () {});
+    });
   }
   function convMsgs() {
     if (conv === 'public') {
@@ -666,11 +710,101 @@
         downloadFile(b.getAttribute('data-fid'), b.getAttribute('data-fn'), b.getAttribute('data-url'));
       });
     });
+    paintMedia();
+  }
+
+  function mediaKind(name) {
+    var n = String(name || '').toLowerCase();
+    if (/\\.(png|jpe?g|gif|webp|bmp|avif|heic|heif)$/.test(n)) return 'img';
+    if (/\\.(mp4|mov|webm|m4v|ogv|mkv|3gp|avi)$/.test(n)) return 'vid';
+    return 'file';
+  }
+
+  var mediaCache = {};          /* 文件编号 -> 本地地址 */
+  var mediaPending = {};
+
+  function loadMedia(fid) {
+    if (mediaCache[fid]) return Promise.resolve(mediaCache[fid]);
+    if (mediaPending[fid]) return mediaPending[fid];
+    var p = fetch(API + 'files/' + encodeURIComponent(fid), {
+      headers: { Authorization: 'token ' + TOKEN, Accept: 'application/vnd.github.raw' }
+    }).then(function (r) {
+      if (!r.ok) throw new Error('读取失败 ' + r.status);
+      return r.blob();
+    }).then(function (b) {
+      var u = URL.createObjectURL(b);
+      mediaCache[fid] = u;
+      delete mediaPending[fid];
+      return u;
+    });
+    mediaPending[fid] = p;
+    return p;
+  }
+
+  function viewImage(u) {
+    var mask = document.createElement('div');
+    mask.className = 'img-mask';
+    mask.innerHTML = '<img src="' + u + '"><div class="tip">点一下关闭</div>';
+    mask.addEventListener('click', function () { mask.remove(); });
+    document.body.appendChild(mask);
+  }
+
+  /* 图片自动加载，视频点了才加载 */
+  function paintMedia() {
+    var list = $('list');
+    if (!list) return;
+    Array.prototype.forEach.call(list.querySelectorAll('.msg-img[data-fid]'), function (el) {
+      if (el.getAttribute('data-on')) return;
+      el.setAttribute('data-on', '1');
+      var fid = el.getAttribute('data-fid');
+      loadMedia(fid).then(function (u) {
+        el.src = u;
+        el.style.minHeight = '0';
+        el.addEventListener('click', function (e) {
+          e.stopPropagation();
+          viewImage(u);
+        });
+      }).catch(function () {
+        el.parentNode.innerHTML = '<div class="media-miss">图片打不开</div>';
+      });
+    });
+    Array.prototype.forEach.call(list.querySelectorAll('.msg-vid[data-fid]'), function (el) {
+      if (el.getAttribute('data-on')) return;
+      el.setAttribute('data-on', '1');
+      var fid = el.getAttribute('data-fid');
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (el.querySelector('video')) return;
+        el.innerHTML = '<div class="vload">视频加载中…</div>';
+        loadMedia(fid).then(function (u) {
+          var v = document.createElement('video');
+          v.src = u;
+          v.controls = true;
+          v.setAttribute('playsinline', '');
+          v.className = 'video-el';
+          v.addEventListener('click', function (ev) { ev.stopPropagation(); });
+          el.innerHTML = '';
+          el.appendChild(v);
+          el.classList.add('playing');
+          v.play().catch(function () {});
+        }).catch(function () {
+          el.innerHTML = '<div class="media-miss">视频打不开</div>';
+        });
+      });
+    });
   }
 
   function bubbleHTML(m) {
     if (m.ty === 'f') {
       var full = RAW + 'files/' + encodeURIComponent(m.fid);
+      var k = mediaKind(m.fn);
+      if (k === 'img') {
+        return '<img class="msg-img" data-fid="' + esc(m.fid) + '" alt="图片">';
+      }
+      if (k === 'vid') {
+        return '<div class="msg-vid" data-fid="' + esc(m.fid) + '" data-fn="' + esc(m.fn || '视频') + '">' +
+          '<span class="vplay">▶</span><span>' + esc(m.fn || '视频') + '</span></div>';
+      }
       return '发来一个文件：<br><button class="file-btn" data-fid="' + esc(m.fid) +
         '" data-fn="' + esc(m.fn || 'file') + '" data-url="' + full + '">' +
         esc(m.fn || m.fid) + '</button>';
@@ -878,7 +1012,9 @@
 
   function doRecall(id) {
     if (!confirm('撤回这条消息？所有人都看不到了')) return;
+    var rec = db.msgs.filter(function (x) { return x.i === id; })[0];
     mutate(function (d) {
+      if (rec && rec.ty === 'f' && rec.fid && _dropFids.indexOf(rec.fid) < 0) _dropFids.push(rec.fid);
       d.msgs = d.msgs.filter(function (m) { return m.i !== id; });
       d.pin = (d.pin || []).filter(function (p) { return p !== id; });
       return true;
