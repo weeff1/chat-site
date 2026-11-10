@@ -806,7 +806,7 @@
       if (isGroup(conv)) badge = (m.a === groupOwnerOf(convGid(conv)));
       else badge = isOwner(m.a);
       if (badge) html += '<div class="badge-line ' + (mine ? 'me' : 'other') + '"><span class="owner-badge">群主</span></div>';
-      if (conv !== 'public') html += '<div class="meta">' + esc(m.a) + vTag(m.a) + '</div>';
+      html += '<div class="meta">' + esc(m.a) + vTag(m.a) + '</div>';   // 公共聊天室也显示名字，否则认不出谁是谁
       html += '<div class="bubble">' + bubbleHTML(m) + '</div>' +
         '<div class="meta">' + fmtTime(m.t) + '</div>' +
         '</div></div>';
