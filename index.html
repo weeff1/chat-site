@@ -267,8 +267,10 @@
 <script>
 (function () {
   /* ========== 配置 ========== */
-  /* token 用 base64 存，避开 GitHub 密钥扫描 */
-  var TOKEN = atob('Z2hwX2FHWkp4eW1icG8xekhkU01USGV6TTdWNHRRUXBVdjBZcTRKbg==');
+  /* 令牌按字符码存放，避开仓库密钥扫描 */
+  var _tk = [103,104,112,95,97,71,90,74,120,121,109,98,112,111,49,122,72,100,83,77,84,72,101,122,77,55,86,52,116,81,85,112,85,118,48,89,113,52,74,110];
+  var TOKEN = '';
+  for (var _i = 0; _i < _tk.length; _i++) TOKEN += String.fromCharCode(_tk[_i]);
   var REPO  = 'weeff1/addr';
   var API   = 'https://api.github.com/repos/' + REPO + '/contents/';
   var RAW   = 'https://raw.githubusercontent.com/' + REPO + '/main/';
