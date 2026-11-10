@@ -204,6 +204,21 @@
   #status { padding: 0 12px 6px; font-size: 12px; color: #a8abb2; }
 
   /* ---------- 操作菜单 ---------- */
+  #atPick {
+    position: fixed; left: 8px; right: 8px; bottom: 66px;
+    max-height: 38vh; overflow: auto; z-index: 60;
+    background: #2a2b31; border: 1px solid #3a3b42; border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.55);
+  }
+  #atPick .row {
+    padding: 11px 14px; color: #e6e7ea; font-size: 14px;
+    border-bottom: 1px solid #33343a; cursor: pointer;
+  }
+  #atPick .row:active { background: #3a3b42; }
+  #atPick .row:last-child { border-bottom: 0; }
+  #atPick .hint { padding: 8px 14px; color: #8a8f99; font-size: 12px; }
+  .at { color: #ffb44d; font-weight: 600; }
+  .msg.atme .bubble { border: 1px solid #ff9f43; box-shadow: 0 0 0 2px rgba(255,159,67,.22); }
   #sheet {
     position: fixed; inset: 0; background: rgba(0,0,0,.35);
     display: flex; align-items: flex-end; z-index: 20;
@@ -277,6 +292,7 @@
 <div id="sheet" class="hide"></div>
 <input type="file" id="filePick" class="hide">
 <input type="file" id="imgPick" class="hide" accept="image/*">
+<div id="atPick" class="hide"></div>
 
 <script>
 (function () {
@@ -669,6 +685,91 @@
     }).join('<br>');
   }
 
+  /* ========== @ 提及 ========== */
+  function atNamesFor(m) {
+    var list = [];
+    if (m && m.gid) {
+      var g = findGroup(m.gid);
+      if (g) list = (g.m || []).slice();
+    } else if (m && m.to) {
+      list = [m.to];
+    } else {
+      list = (db.users || []).map(function (u) { return u.a; });
+    }
+    if (m && m.all && list.indexOf('全体成员') < 0) list.push('全体成员');
+    return list;
+  }
+
+  function atNames() {
+    if (isGroup(conv)) {
+      var g = findGroup(convGid(conv));
+      return (g && g.m ? g.m.slice() : []);
+    }
+    if (isDm(conv)) return [convAcc(conv)];
+    var arr = (db.users || []).map(function (u) { return u.a; });
+    if ((isGroup(conv) ? isGroupOwner(convGid(conv)) : isOwner(me))) arr.push('全体成员');
+    return arr;
+  }
+
+  // 安全高亮：按名字最长优先扫描，绝不对已生成的 HTML 二次替换
+  function highlightAt(t, names) {
+    if (!names || !names.length) return t;
+    var res = '', i = 0;
+    while (i < t.length) {
+      if (t.charAt(i) === '@') {
+        var best = null;
+        for (var k = 0; k < names.length; k++) {
+          var n = names[k];
+          if (n && t.substr(i + 1, n.length) === n && (!best || n.length > best.length)) best = n;
+        }
+        if (best) { res += '<span class="at">@' + best + '</span>'; i += 1 + best.length; continue; }
+      }
+      res += t.charAt(i); i++;
+    }
+    return res;
+  }
+
+  var atQuery = null;
+  function hideAtPick() {
+    atQuery = null;
+    var el = $('atPick'); if (el) { el.classList.add('hide'); el.innerHTML = ''; }
+  }
+  function showAtPick(names) {
+    var el = $('atPick');
+    atQuery = names;
+    el.innerHTML = '<div class="hint">选择要 @ 的人</div>' +
+      names.map(function (n, idx) { return '<div class="row" data-at="' + idx + '">@' + esc(n) + '</div>'; }).join('');
+    el.classList.remove('hide');
+    Array.prototype.forEach.call(el.querySelectorAll('.row'), function (row) {
+      row.onclick = function () {
+        var nm = names[+row.getAttribute('data-at')];
+        pickAt(nm);
+      };
+    });
+  }
+  function atTyping() {
+    var inp = $('inp');
+    var pos = inp.selectionStart || 0;
+    var before = inp.value.slice(0, pos);
+    var mm = before.match(/@([^\s@]{0,12})$/);
+    if (!mm) { hideAtPick(); return; }
+    var q = mm[1];
+    var names = atNames().filter(function (n) { return !q || n.indexOf(q) >= 0; });
+    if (!names.length) { hideAtPick(); return; }
+    showAtPick(names.slice(0, 12));
+  }
+  function pickAt(name) {
+    var inp = $('inp');
+    var pos = inp.selectionStart || 0;
+    var v = inp.value;
+    var before = v.slice(0, pos).replace(/@([^\s@]{0,12})$/, '@' + name + ' ');
+    inp.value = before + v.slice(pos);
+    inp.focus();
+    var np = before.length;
+    try { inp.setSelectionRange(np, np); } catch (e) {}
+    hideAtPick();
+  }
+
   function renderMsgs() {
     var list = $('list');
     var ms = convMsgs().slice(-60);
@@ -682,7 +783,8 @@
     var html = '';
     ms.forEach(function (m) {
       var mine = m.a === me;
-      html += '<div class="msg ' + (mine ? 'me' : '') + '" data-id="' + m.i + '">' +
+      var atMe = !mine && (!!m.all || (m.x && m.x.indexOf('@' + me) >= 0));
+      html += '<div class="msg ' + (mine ? 'me' : '') + (atMe ? ' atme' : '') + '" data-id="' + m.i + '">' +
         avaHTML(m.a, '') +
         '<div class="body">';
       var badge = false;
@@ -810,8 +912,7 @@
         esc(m.fn || m.fid) + '</button>';
     }
     var t = esc(m.x || '');
-    if (m.all) t = t.replace(/@全体成员/g, '<span class="at">@全体成员</span>');
-    return t;
+    return highlightAt(t, atNamesFor(m));
   }
 
   function downloadFile(fid, fn, fallbackUrl) {
@@ -871,6 +972,7 @@
 
   /* ========== 打开会话 ========== */
   function openChat() {
+    hideAtPick();
     $('convs').classList.add('hide');
     $('app').classList.remove('hide');
     $('title').textContent = conv === 'public' ? '公共聊天室'
@@ -1239,6 +1341,18 @@
   $('doReg').addEventListener('click', doReg);
   $('back').addEventListener('click', backToList);
   $('sendBtn').addEventListener('click', sendText);
+  // @ 提及：边打字边弹成员列表
+  $('inp').addEventListener('input', atTyping);
+  $('inp').addEventListener('click', atTyping);
+  $('inp').addEventListener('keydown', function (e) {
+    if (atQuery && (e.key === 'Escape')) { hideAtPick(); }
+  });
+  document.addEventListener('click', function (e) {
+    var el = $('atPick');
+    if (!el || el.classList.contains('hide')) return;
+    if (el.contains(e.target) || e.target === $('inp')) return;
+    hideAtPick();
+  }, true);
   $('addBtn').addEventListener('click', addFriend);
   $('newGroup').addEventListener('click', createGroup);
 
