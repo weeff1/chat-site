@@ -715,8 +715,8 @@
 
   function mediaKind(name) {
     var n = String(name || '').toLowerCase();
-    if (/\\.(png|jpe?g|gif|webp|bmp|avif|heic|heif)$/.test(n)) return 'img';
-    if (/\\.(mp4|mov|webm|m4v|ogv|mkv|3gp|avi)$/.test(n)) return 'vid';
+    if (/\.(png|jpe?g|gif|webp|bmp|avif|heic|heif)$/.test(n)) return 'img';
+    if (/\.(mp4|mov|webm|m4v|ogv|mkv|3gp|avi)$/.test(n)) return 'vid';
     return 'file';
   }
 
