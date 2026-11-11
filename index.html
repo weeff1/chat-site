@@ -315,7 +315,9 @@
   var DB_PATH = 'chat-db.json';
   var KEEP_MSGS = 150;          /* 数据库里最多留多少条 */
   var KEEP_DAYS = 10;           /* 超过 10 天的消息自动清掉 */
-  var POLL_MS = 3000;
+  var POLL_MS = 500;          /* 前台：0.5 秒拉一次，基本做到秒回 */
+  var POLL_BG = 5000;         /* 切到后台：5 秒，省流量省电 */
+  var POLL_BACKOFF = 3000;    /* 请求失败/被限流时的退避起点 */
 
   var db = { v: 1, users: [], msgs: [], fr: [], notice: null, pin: [], mute: {}, meta: { owner: OWNER } };
   var me = '';
@@ -1005,14 +1007,25 @@
   /* ========== 轮询 ========== */
   function startPoll() {
     stopPoll();
-    timer = setInterval(function () {
+    var backoff = 0;
+    function tick() {
+      var gap = document.hidden ? POLL_BG : POLL_MS;
       loadDB(false).then(function (r) {
+        backoff = 0;
         if (r.changed) renderAll();
-      }).catch(function () {});
-    }, POLL_MS);
+      }).catch(function () {
+        // 失败或被限流就退避，别把配额打爆
+        backoff = Math.min(backoff ? backoff * 2 : POLL_BACKOFF, 15000);
+      }).then(function () {
+        gap = document.hidden ? POLL_BG : POLL_MS;
+        if (backoff) gap = Math.max(gap, backoff);
+        timer = setTimeout(tick, gap);
+      });
+    }
+    timer = setTimeout(tick, POLL_MS);
   }
   function stopPoll() {
-    if (timer) { clearInterval(timer); timer = null; }
+    if (timer) { clearTimeout(timer); clearInterval(timer); timer = null; }
   }
 
   /* ========== 发消息 ========== */
@@ -1228,12 +1241,15 @@
 
   var listTimer = null;
   function startListPoll() {
-    if (listTimer) clearInterval(listTimer);
-    listTimer = setInterval(function () {
+    if (listTimer) { clearTimeout(listTimer); clearInterval(listTimer); }
+    function tick() {
       loadDB(false).then(function (r) {
         if (r.changed && $('convs').classList.contains('hide') === false) renderConvs();
-      }).catch(function () {});
-    }, 8000);
+      }).catch(function () {}).then(function () {
+        listTimer = setTimeout(tick, document.hidden ? 8000 : 1200);
+      });
+    }
+    listTimer = setTimeout(tick, 1200);
   }
 
   /* ========== 加好友 ========== */
@@ -1354,6 +1370,14 @@
   $('doLogin').addEventListener('click', doLogin);
   $('doReg').addEventListener('click', doReg);
   $('back').addEventListener('click', backToList);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && me) {
+      loadDB(false).then(function (r) {
+        if (r.changed) renderAll();
+        if ($('convs').classList.contains('hide') === false) renderConvs();
+      }).catch(function () {});
+    }
+  });
   $('sendBtn').addEventListener('click', sendText);
   // @ 提及：边打字边弹成员列表
   $('inp').addEventListener('input', atTyping);
