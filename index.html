@@ -138,6 +138,24 @@
   .msg.me .body { align-items: flex-end; }
   .badge-line { display: flex; margin-bottom: 3px; }
   .badge-line.me { justify-content: flex-end; }
+  /* ===== 成员 / 管理员管理面板 ===== */
+  #mPanel{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,.62);z-index:80;display:none;align-items:flex-end;justify-content:center}
+  #mPanel.show{display:flex}
+  #mPanel .mbox{width:100%;max-width:520px;max-height:82vh;background:#1b1c21;border-radius:16px 16px 0 0;padding:14px 14px 24px;overflow:auto;color:#e8e8ea}
+  #mPanel .mhead{display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:600;padding-bottom:10px;border-bottom:1px solid #2a2c33}
+  #mPanel .mclose{background:none;border:0;color:#8b8f98;font-size:22px;line-height:1;padding:0 4px}
+  #mPanel .mrow{display:flex;align-items:center;gap:6px;padding:10px 0;border-bottom:1px solid #26282e;flex-wrap:wrap}
+  #mPanel .mname{font-size:14px;flex:1 1 auto;min-width:80px;word-break:break-all}
+  #mPanel .role{font-size:10px;padding:1px 6px;border-radius:6px;background:#223554;color:#8fd0ff;border:1px solid #33506e;white-space:nowrap}
+  #mPanel .role.o{background:#4a3418;color:#ffce6a;border-color:#6b4a20}
+  #mPanel .role.bl{background:#3a1e1e;color:#ff9d9d;border-color:#5a2a2a}
+  #mPanel .role.mu{background:#2c2c33;color:#c8cbd2;border-color:#3d4048}
+  #mPanel .role.me{background:#1e2f24;color:#9be3a5;border-color:#2f5a3a}
+  #mPanel .acts{display:flex;gap:6px;flex-wrap:wrap;flex:0 0 100%}
+  #mPanel .acts button{font-size:11px;padding:5px 9px;border-radius:8px;border:1px solid #33363d;background:#24262c;color:#cfd3da}
+  #mPanel .acts button.warn{color:#ff9d9d;border-color:#5a2a2a}
+  #mPanel .mtip{font-size:11px;color:#6f737c;line-height:1.8;padding-top:12px}
+
   .owner-badge {
     background: #ff7a00; color: #fff; font-size: 10px; padding: 1px 6px;
     border-radius: 4px; line-height: 1.5;
@@ -297,6 +315,14 @@
 </div>
 
 <div id="sheet" class="hide"></div>
+
+<div id="mPanel">
+  <div class="mbox">
+    <div class="mhead"><span id="mTitle">群成员</span><button class="mclose" id="mClose">×</button></div>
+    <div id="mList"></div>
+    <div class="mtip" id="mTip"></div>
+  </div>
+</div>
 <input type="file" id="filePick" class="hide">
 <input type="file" id="imgPick" class="hide" accept="image/*">
 <div id="atPick" class="hide"></div>
@@ -397,6 +423,12 @@
     d.mute = d.mute || {};
     d.meta = d.meta || { owner: OWNER };
     if (!d.meta.owner) d.meta.owner = OWNER;
+    /* 群的三个管理字段：管理员名单 / 黑名单 / 群内禁言到期时间 */
+    d.groups.forEach(function (g) {
+      g.adm = g.adm || [];
+      g.bl  = g.bl  || [];
+      g.gmu = g.gmu || {};
+    });
     return d;
   }
 
@@ -426,6 +458,52 @@
   function isGroupOwner(gid) {
     var g = findGroup(gid);
     return !!g && (g.o === me || isOwner(me));
+  }
+
+  /* ========== 群管理员体系 ========== */
+  /* 名额：自己建的群最多 10 个管理员，别人的群最多 5 个 */
+  function adminLimitIn(g) { return (g && g.o === me) ? 10 : 5; }
+  function adminLimit(gid) { return adminLimitIn(findGroup(gid)); }
+
+  function isGroupAdminIn(g, acc) { return !!(g && g.adm && g.adm.indexOf(acc) >= 0); }
+  function isGroupAdmin(gid) { return isGroupAdminIn(findGroup(gid), me); }
+
+  /* 「我的群」：群主是我本人，或者群主是站长 */
+  function isMyOwnGroupIn(g) { return !!g && (g.o === me || isOwner(g.o)); }
+
+  /* 能禁言 / 踢人 / 拉黑：
+     - 群主本人、站长：随时可以
+     - 我的群（群主是我 / 站长）：管理员不许踢人拉黑，只有群主能
+     - 别人的群：管理员可以踢人拉黑
+     禁言不受这条限制，管理员在任何群都能禁言 */
+  function canModerateIn(g) {
+    if (!g) return false;
+    if (g.o === me || isOwner(me)) return true;
+    if (isOwner(g.o)) return false;
+    return isGroupAdminIn(g, me) && !isMyOwnGroupIn(g);
+  }
+  function canModerate(gid) { return canModerateIn(findGroup(gid)); }
+
+  /* 能禁言：群主 + 管理员都行，不受「我的群」限制 */
+  function canMuteIn(g) {
+    if (!g) return false;
+    if (g.o === me || isOwner(me)) return true;
+    return isGroupAdminIn(g, me);
+  }
+
+  /* 能任命 / 撤销管理员：只有群主 */
+  function canAppoint(gid) {
+    var g = findGroup(gid);
+    return !!g && (g.o === me || isOwner(me));
+  }
+
+  function isBlocked(gid, acc) {
+    var g = findGroup(gid);
+    return !!(g && g.bl && g.bl.indexOf(acc) >= 0);
+  }
+  function groupMuteUntil(gid, acc) {
+    var g = findGroup(gid);
+    return (g && g.gmu && g.gmu[acc]) || 0;
   }
 
   function loadDB(force) {
@@ -719,12 +797,19 @@
 
   function atNames() {
     if (isGroup(conv)) {
-      var g = findGroup(convGid(conv));
-      return (g && g.m ? g.m.slice() : []);
+      var gidA = convGid(conv);
+      var gA = findGroup(gidA);
+      var arrA = (gA && gA.m ? gA.m.slice() : []);
+      /* 群主和管理员才有 @全体成员 */
+      if (isGroupOwner(gidA) || isGroupAdmin(gidA)) arrA.push('全体成员');
+      return arrA;
     }
     if (isDm(conv)) return [convAcc(conv)];
     var arr = (db.users || []).map(function (u) { return u.a; });
-    if ((isGroup(conv) ? isGroupOwner(convGid(conv)) : isOwner(me))) arr.push('全体成员');
+    var allOk = isGroup(conv)
+      ? (isGroupOwner(convGid(conv)) || isGroupAdmin(convGid(conv)))
+      : isOwner(me);
+    if (allOk) arr.push('全体成员');
     return arr;
   }
 
@@ -1033,11 +1118,23 @@
     var text = $('inp').value.trim();
     if (!text) return;
     if (isMuted(me)) { $('status').textContent = '你被禁言了，发不出去'; return; }
+    if (isGroup(conv)) {
+      var g0 = convGid(conv);
+      if (isBlocked(g0, me)) { $('status').textContent = '你被群管理员拉黑了，在这个群发不了消息'; return; }
+      var mu0 = groupMuteUntil(g0, me);
+      if (mu0 > Date.now()) {
+        $('status').textContent = '你被群管理员禁言了，还剩 ' + Math.ceil((mu0 - Date.now()) / 60000) + ' 分钟';
+        return;
+      }
+    }
     $('inp').value = '';
     $('inp').style.height = 'auto';
     $('status').textContent = '发送中…';
 
-    var useAtAll = (isGroup(conv) ? isGroupOwner(convGid(conv)) : isOwner(me)) && /@全体成员/.test(text);
+    var allOk2 = isGroup(conv)
+      ? (isGroupOwner(convGid(conv)) || isGroupAdmin(convGid(conv)))
+      : isOwner(me);
+    var useAtAll = allOk2 && /@全体成员/.test(text);
 
     mutate(function (d) {
       var id = 1;
@@ -1065,6 +1162,8 @@
   /* ========== 上传文件 ========== */
   function uploadFile(file) {
     if (isMuted(me)) { alert('你被禁言了'); return; }
+    if (isGroup(conv) && isBlocked(convGid(conv), me)) { alert('你被群管理员拉黑了，发不了文件'); return; }
+    if (isGroup(conv) && groupMuteUntil(convGid(conv), me) > Date.now()) { alert('你被群禁言中，发不了文件'); return; }
     if (file.size > 20 * 1024 * 1024) {
       if (!confirm('这个文件 ' + Math.round(file.size / 1048576) + 'MB，传上去会比较慢，确定要传吗？')) return;
     }
@@ -1104,10 +1203,18 @@
     if (!m) return;
     var mine = m.a === me;
     var owner = isGroup(conv) ? isGroupOwner(convGid(conv)) : isOwner(me);
+    var mod = isGroup(conv) ? canModerate(convGid(conv)) : isOwner(me);
+    var canMute = isGroup(conv) ? canMuteIn(findGroup(convGid(conv))) : isOwner(me);
     var items = [];
 
     if (mine || owner) items.push({ t: '撤回这条', danger: true, fn: function () { doRecall(id); } });
-    if (owner && !mine) items.push({ t: '禁言 ' + m.a, danger: true, fn: function () { doMute(m.a); } });
+    if (canMute && !mine) items.push({ t: '禁言 ' + m.a, danger: true, fn: function () {
+      if (isGroup(conv)) muteMember(m.a); else doMute(m.a);
+    } });
+    if (mod && !mine && isGroup(conv)) {
+      items.push({ t: '踢出 ' + m.a, danger: true, fn: function () { kickMember(m.a); } });
+      items.push({ t: (isBlocked(convGid(conv), m.a) ? '取消拉黑 ' : '拉黑 ') + m.a, danger: true, fn: function () { toggleBlock(m.a); } });
+    }
     if (owner) items.push({ t: '置顶这条', fn: function () { doPin(id); } });
     items.push({ t: '复制内容', fn: function () {
       var txt = m.ty === 'f' ? (RAW + 'files/' + encodeURIComponent(m.fid)) : (m.x || '');
@@ -1297,6 +1404,166 @@
     }).catch(function (e) { alert(e.message || '拉人失败'); });
   }
 
+  /* ========== 成员 / 管理员管理面板 ========== */
+  function openMembers() {
+    if (!isGroup(conv)) return;
+    renderMembers();
+    $('mPanel').classList.add('show');
+  }
+
+  function renderMembers() {
+    var gid = convGid(conv);
+    var g = findGroup(gid);
+    if (!g) return;
+    var adm = g.adm || [], bl = g.bl || [], gmu = g.gmu || {};
+    var iAmOwner = (g.o === me) || isOwner(me);
+    var lim = adminLimitIn(g);
+    var canMod = canModerateIn(g);
+    var canMute = canMuteIn(g);
+
+    $('mTitle').textContent = '群成员 ' + g.m.length + '/50';
+    $('mTip').innerHTML =
+      '管理员 ' + adm.length + ' / ' + lim + (lim >= 10 ? '（你当群主的群，最多 10 个）' : '（别人的群，最多 5 个）') +
+      '<br>· 管理员可以 @全体成员、禁言别人' +
+      '<br>· 禁言：群主和管理员都能用' +
+      '<br>· 踢人 / 拉黑：' + (iAmOwner
+        ? '你是群主，只有你能踢人拉黑'
+        : (canMod ? '你是管理员，可以操作'
+          : (isOwner(g.o) ? '这个群是站长的，只有站长能踢人拉黑' : '这个群只有群主能踢人拉黑')));
+
+    var html = g.m.map(function (a) {
+      var tags = '';
+      if (a === g.o) tags += '<span class="role o">群主</span>';
+      else if (adm.indexOf(a) >= 0) tags += '<span class="role">管理员</span>';
+      if (bl.indexOf(a) >= 0) tags += '<span class="role bl">已拉黑</span>';
+      if ((gmu[a] || 0) > Date.now()) tags += '<span class="role mu">禁言中</span>';
+      if (a === me) tags += '<span class="role me">我</span>';
+
+      var acts = [];
+      if (iAmOwner && a !== g.o && a !== me) {
+        acts.push('<button data-act="adm" data-acc="' + esc(a) + '">' +
+          (adm.indexOf(a) >= 0 ? '撤销管理' : '设为管理') + '</button>');
+      }
+      if (canMute && a !== g.o && a !== me) {
+        acts.push('<button data-act="mute" data-acc="' + esc(a) + '">禁言</button>');
+      }
+      if (canMod && a !== g.o && a !== me) {
+        acts.push('<button data-act="kick" data-acc="' + esc(a) + '" class="warn">踢出</button>');
+        acts.push('<button data-act="bl" data-acc="' + esc(a) + '">' +
+          (bl.indexOf(a) >= 0 ? '取消拉黑' : '拉黑') + '</button>');
+      }
+      return '<div class="mrow"><span class="mname">' + esc(a) + '</span>' + tags +
+        (acts.length ? '<div class="acts">' + acts.join('') + '</div>' : '') + '</div>';
+    }).join('');
+
+    $('mList').innerHTML = html || '<div style="padding:20px 0;color:#8b8f98;font-size:13px">群成员读不到，刷新一下试试</div>';
+
+    Array.prototype.forEach.call($('mList').querySelectorAll('button[data-act]'), function (b) {
+      b.onclick = function () {
+        var act = b.getAttribute('data-act');
+        var acc = b.getAttribute('data-acc');
+        if (act === 'adm') toggleAdmin(acc);
+        else if (act === 'mute') muteMember(acc);
+        else if (act === 'kick') kickMember(acc);
+        else if (act === 'bl') toggleBlock(acc);
+      };
+    });
+  }
+
+  /* 任命 / 撤销管理员 */
+  function toggleAdmin(acc) {
+    var gid = convGid(conv);
+    var g = findGroup(gid);
+    if (!g) return;
+    var has = (g.adm || []).indexOf(acc) >= 0;
+    if (!has && (g.adm || []).length >= adminLimitIn(g)) {
+      alert('管理员最多 ' + adminLimitIn(g) + ' 个，先撤销一个再加');
+      return;
+    }
+    mutate(function (d) {
+      var tg = (d.groups || []).filter(function (x) { return x.id === gid; })[0];
+      if (!tg) throw new Error('群不存在');
+      if (!canAppoint(gid)) throw new Error('只有群主能任命管理员');
+      tg.adm = tg.adm || [];
+      var i = tg.adm.indexOf(acc);
+      if (i >= 0) {
+        tg.adm.splice(i, 1);
+      } else {
+        if (tg.adm.length >= adminLimitIn(tg)) throw new Error('管理员名额满了，上限 ' + adminLimitIn(tg) + ' 个');
+        tg.adm.push(acc);
+      }
+      return true;
+    }).then(function () {
+      renderMembers(); renderAll();
+      alert(has ? ('已撤销 ' + acc + ' 的管理员') : ('已把 ' + acc + ' 设为管理员'));
+    }).catch(function (e) { alert(e.message || '操作失败'); });
+  }
+
+  /* 群内禁言 */
+  function muteMember(acc) {
+    var gid = convGid(conv);
+    var g = findGroup(gid);
+    if (!g) return;
+    var left = 0;
+    var cur = groupMuteUntil(gid, acc);
+    if (cur > Date.now()) left = Math.ceil((cur - Date.now()) / 60000);
+    var v = prompt('禁言「' + acc + '」多少分钟？填 0 = 解除', left || 10);
+    if (v === null) return;
+    var min = parseInt(v, 10);
+    if (isNaN(min) || min < 0) { alert('填个分钟数，比如 10'); return; }
+    mutate(function (d) {
+      var tg = (d.groups || []).filter(function (x) { return x.id === gid; })[0];
+      if (!tg) throw new Error('群不存在');
+      if (!canModerateIn(tg)) throw new Error('你没有权限');
+      tg.gmu = tg.gmu || {};
+      if (min <= 0) delete tg.gmu[acc];
+      else tg.gmu[acc] = Date.now() + min * 60000;
+      return true;
+    }).then(function () {
+      renderMembers(); renderAll();
+      alert(min > 0 ? ('已禁言 ' + acc + ' ' + min + ' 分钟') : ('已解除 ' + acc + ' 的禁言'));
+    }).catch(function (e) { alert(e.message || '操作失败'); });
+  }
+
+  /* 踢出群 */
+  function kickMember(acc) {
+    var gid = convGid(conv);
+    if (!confirm('把「' + acc + '」踢出这个群？')) return;
+    mutate(function (d) {
+      var tg = (d.groups || []).filter(function (x) { return x.id === gid; })[0];
+      if (!tg) throw new Error('群不存在');
+      if (!canModerateIn(tg)) throw new Error('你没有权限踢人');
+      if (acc === tg.o) throw new Error('不能踢群主');
+      tg.m = tg.m.filter(function (a) { return a !== acc; });
+      tg.adm = (tg.adm || []).filter(function (a) { return a !== acc; });
+      return true;
+    }).then(function () {
+      renderMembers(); renderAll();
+      alert('已把 ' + acc + ' 踢出群');
+    }).catch(function (e) { alert(e.message || '操作失败'); });
+  }
+
+  /* 拉黑 / 取消拉黑 */
+  function toggleBlock(acc) {
+    var gid = convGid(conv);
+    var g = findGroup(gid);
+    if (!g) return;
+    var has = (g.bl || []).indexOf(acc) >= 0;
+    mutate(function (d) {
+      var tg = (d.groups || []).filter(function (x) { return x.id === gid; })[0];
+      if (!tg) throw new Error('群不存在');
+      if (!canModerateIn(tg)) throw new Error('你没有权限拉黑');
+      if (acc === tg.o) throw new Error('不能拉黑群主');
+      tg.bl = tg.bl || [];
+      var i = tg.bl.indexOf(acc);
+      if (i >= 0) tg.bl.splice(i, 1); else tg.bl.push(acc);
+      return true;
+    }).then(function () {
+      renderMembers(); renderAll();
+      alert(has ? ('已取消拉黑 ' + acc) : ('已拉黑 ' + acc + '，TA 在这个群发不了消息'));
+    }).catch(function (e) { alert(e.message || '操作失败'); });
+  }
+
   function showMembers() {
     var g = findGroup(convGid(conv));
     if (!g) return;
@@ -1392,6 +1659,7 @@
     hideAtPick();
   }, true);
   $('addBtn').addEventListener('click', addFriend);
+  $('mClose').addEventListener('click', function () { $('mPanel').classList.remove('show'); });
   $('newGroup').addEventListener('click', createGroup);
 
   $('inp').addEventListener('keydown', function (e) {
@@ -1446,7 +1714,7 @@
 
     if (inGroup) {
       items.push({ t: '邀请好友进群', fn: inviteToGroup });
-      items.push({ t: '看群成员', fn: showMembers });
+      items.push({ t: '成员 / 管理员', fn: openMembers });
       if (gOwner) items.push({ t: '改群名', fn: renameGroup });
     }
     if (gOwner || (!inGroup && isOwner(me))) {
