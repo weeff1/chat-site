@@ -1363,6 +1363,10 @@
       if (d.users.filter(function (x) { return x.a === a; }).length) {
         throw new Error('这个账号已经有人用了');
       }
+      var oldO = (d.meta && d.meta.oldOwners) || [];
+      if (oldO.indexOf(a) >= 0) {
+        throw new Error('这个名字是站长用过的，换一个吧');
+      }
       d.users.push({ a: a, p: hashPass(p), t: Date.now() });
       return true;
     }).then(function () {
@@ -1373,6 +1377,59 @@
     }).catch(function (e) {
       lmsg(e.message || '注册失败');
     }).then(function () { $('doReg').disabled = false; });
+  }
+
+  /* ========== 改自己的名字 ========== */
+  function renameMe() {
+    var nv = prompt('改成什么名字？（2 到 16 个字，改完你发过的消息、建的群、好友关系都会跟着变）', me);
+    if (nv === null) return;
+    nv = String(nv).trim();
+    if (!nv || nv === me) return;
+    if (nv.length < 2 || nv.length > 16) { alert('名字要 2 到 16 个字'); return; }
+    if (/\s/.test(nv)) { alert('名字里不能有空格'); return; }
+    if (nv.indexOf('@') >= 0) { alert('名字里不能带 @'); return; }
+    if ((db.users || []).some(function (u) { return u.a === nv; })) { alert('「' + nv + '」已经有人用了'); return; }
+    if (!confirm('把名字从「' + me + '」改成「' + nv + '」？')) return;
+
+    var oldN = me;
+    $('status').textContent = '正在改名…';
+    mutate(function (d) {
+      (d.users || []).forEach(function (u) { if (u.a === oldN) u.a = nv; });
+      (d.msgs || []).forEach(function (m) {
+        if (m.a === oldN) m.a = nv;
+        if (m.to === oldN) m.to = nv;
+      });
+      (d.groups || []).forEach(function (g) {
+        g.m = (g.m || []).map(function (x) { return x === oldN ? nv : x; });
+        if (g.o === oldN) g.o = nv;
+        g.adm = (g.adm || []).map(function (x) { return x === oldN ? nv : x; });
+        g.bl = (g.bl || []).map(function (x) { return x === oldN ? nv : x; });
+        if (g.gmu && g.gmu[oldN] !== undefined) { g.gmu[nv] = g.gmu[oldN]; delete g.gmu[oldN]; }
+      });
+      d.pub = d.pub || {};
+      d.pub.adm = (d.pub.adm || []).map(function (x) { return x === oldN ? nv : x; });
+      d.pub.bl = (d.pub.bl || []).map(function (x) { return x === oldN ? nv : x; });
+      if (d.pub.gmu && d.pub.gmu[oldN] !== undefined) { d.pub.gmu[nv] = d.pub.gmu[oldN]; delete d.pub.gmu[oldN]; }
+      (d.fr || []).forEach(function (p) {
+        if (p[0] === oldN) p[0] = nv;
+        if (p[1] === oldN) p[1] = nv;
+      });
+      if (d.mute && d.mute[oldN] !== undefined) { d.mute[nv] = d.mute[oldN]; delete d.mute[oldN]; }
+      /* 站长改名：群主权限绑在账号名上，要一起搬过去；旧名字记下来，防止被人抢注 */
+      if (d.meta && d.meta.owner === oldN) {
+        d.meta.owner = nv;
+        d.meta.oldOwners = d.meta.oldOwners || [];
+        if (d.meta.oldOwners.indexOf(oldN) < 0) d.meta.oldOwners.push(oldN);
+      }
+      return true;
+    }).then(function () {
+      delete avaCache[oldN];
+      localStorage.setItem('chat_me', nv);
+      $('status').textContent = '改好了，正在重新载入…';
+      setTimeout(function () { location.reload(); }, 700);
+    }).catch(function (e) {
+      $('status').textContent = e.message || '改名失败';
+    });
   }
 
   function enter() {
@@ -1699,6 +1756,7 @@
     hideAtPick();
   }, true);
   $('addBtn').addEventListener('click', addFriend);
+  $('whoAmI').addEventListener('click', renameMe);
   $('mClose').addEventListener('click', function () { $('mPanel').classList.remove('show'); });
   $('newGroup').addEventListener('click', createGroup);
 
@@ -1752,6 +1810,7 @@
     var gid = inGroup ? convGid(conv) : '';
     var gOwner = inGroup ? isGroupOwner(gid) : false;
 
+    items.push({ t: '改我的名字', fn: renameMe });
     items.push({ t: '成员 / 管理员', fn: openMembers });
     if (inGroup) {
       items.push({ t: '邀请好友进群', fn: inviteToGroup });
